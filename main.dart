@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'shared_prefs_service.dart';
 
 void main() {
   runApp(const CalculatorApp());
@@ -36,19 +36,28 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   @override
   void initState() {
     super.initState();
-    _loadLastValue();
+    _loadLastResult();
   }
 
-  Future<void> _loadLastValue() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _display = prefs.getString('lastValue') ?? '0';
-    });
+  // Load last saved result on app start
+  void _loadLastResult() async {
+    String? lastResult = await SharedPrefsService.getLastResult();
+    if (lastResult != null) {
+      setState(() {
+        _display = lastResult;
+      });
+    }
   }
 
-  Future<void> _saveLastValue() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setString('lastValue', _display);
+  // Recall the stored last result manually
+  void _recallLastResult() async {
+    String? lastResult = await SharedPrefsService.getLastResult();
+    if (lastResult != null) {
+      setState(() {
+        _display = lastResult;
+        _isNewInput = true; // So it won't keep adding numbers after recall
+      });
+    }
   }
 
   void _onDigitPress(String digit) {
@@ -56,54 +65,47 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       if (_isNewInput || _display == '0') {
         _display = digit;
         _isNewInput = false;
-      } else if (_display.length < 8) {
-        _display += digit;
+      } else {
+        if (_display.length < 8) {
+          _display += digit;
+        }
       }
     });
   }
 
   void _onOperatorPress(String operator) {
     setState(() {
-      _num1 = double.tryParse(_display) ?? 0;
+      _num1 = double.parse(_display);
       _operator = operator;
       _isNewInput = true;
     });
   }
 
-  void _calculateResult() {
+  void _calculateResult() async {
     setState(() {
-      _num2 = double.tryParse(_display) ?? 0;
+      _num2 = double.parse(_display);
       double result = 0;
 
-      if (_operator != null) {
-        switch (_operator) {
-          case '+':
-            result = _num1 + _num2;
-            break;
-          case '-':
-            result = _num1 - _num2;
-            break;
-          case '*':
-            result = _num1 * _num2;
-            break;
-          case '/':
-            if (_num2 != 0) {
-              result = _num1 / _num2;
-            } else {
-              _display = 'ERROR';
-              return;
-            }
-            break;
-        }
-
-        if (result.abs() > 99999999) {
-          _display = 'OVERFLOW';
-        } else {
-          _display = result.toStringAsFixed(2);
-        }
-
-        _saveLastValue();
+      switch (_operator) {
+        case '+':
+          result = _num1 + _num2;
+          break;
+        case '-':
+          result = _num1 - _num2;
+          break;
+        case '*':
+          result = _num1 * _num2;
+          break;
+        case '/':
+          result = _num2 != 0 ? _num1 / _num2 : double.nan;
+          break;
       }
+
+      _display = result.toStringAsFixed(2);
+      _isNewInput = true;
+
+      // Save result to shared preferences
+      SharedPrefsService.saveLastResult(_display);
     });
   }
 
@@ -117,11 +119,12 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     });
   }
 
-  Widget _buildButton(String text, {Color? color, Function()? onPressed}) {
+  Widget _buildButton(String text, Function()? onPressed) {
     return Expanded(
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: color ?? Colors.grey[800],
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
           padding: const EdgeInsets.all(20),
         ),
         onPressed: onPressed,
@@ -149,41 +152,42 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               ),
             ),
           ),
-          Row(
-            children: [
-              _buildButton('7', onPressed: () => _onDigitPress('7')),
-              _buildButton('8', onPressed: () => _onDigitPress('8')),
-              _buildButton('9', onPressed: () => _onDigitPress('9')),
-              _buildButton('/', color: Colors.orange, onPressed: () => _onOperatorPress('/')),
-            ],
-          ),
-          Row(
-            children: [
-              _buildButton('4', onPressed: () => _onDigitPress('4')),
-              _buildButton('5', onPressed: () => _onDigitPress('5')),
-              _buildButton('6', onPressed: () => _onDigitPress('6')),
-              _buildButton('*', color: Colors.orange, onPressed: () => _onOperatorPress('*')),
-            ],
-          ),
-          Row(
-            children: [
-              _buildButton('1', onPressed: () => _onDigitPress('1')),
-              _buildButton('2', onPressed: () => _onDigitPress('2')),
-              _buildButton('3', onPressed: () => _onDigitPress('3')),
-              _buildButton('-', color: Colors.orange, onPressed: () => _onOperatorPress('-')),
-            ],
-          ),
-          Row(
-            children: [
-              _buildButton('0', onPressed: () => _onDigitPress('0')),
-              _buildButton('C', color: Colors.red, onPressed: _clearDisplay),
-              _buildButton('=', color: Colors.green, onPressed: _calculateResult),
-              _buildButton('+', color: Colors.orange, onPressed: () => _onOperatorPress('+')),
-            ],
-          ),
+          Row(children: [
+            _buildButton('7', () => _onDigitPress('7')),
+            _buildButton('8', () => _onDigitPress('8')),
+            _buildButton('9', () => _onDigitPress('9')),
+            _buildButton('/', () => _onOperatorPress('/')),
+          ]),
+          Row(children: [
+            _buildButton('4', () => _onDigitPress('4')),
+            _buildButton('5', () => _onDigitPress('5')),
+            _buildButton('6', () => _onDigitPress('6')),
+            _buildButton('*', () => _onOperatorPress('*')),
+          ]),
+          Row(children: [
+            _buildButton('1', () => _onDigitPress('1')),
+            _buildButton('2', () => _onDigitPress('2')),
+            _buildButton('3', () => _onDigitPress('3')),
+            _buildButton('-', () => _onOperatorPress('-')),
+          ]),
+          Row(children: [
+            _buildButton('0', () => _onDigitPress('0')),
+            _buildButton('C', _clearDisplay),
+            _buildButton('=', _calculateResult),
+            _buildButton('+', () => _onOperatorPress('+')),
+          ]),
+          Row(children: [
+            _buildButton('RCL', _recallLastResult), // NEW Recall Button
+          ]),
         ],
       ),
     );
   }
 }
+
+
+
+
+
+
 
